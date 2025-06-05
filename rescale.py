@@ -1,16 +1,16 @@
-import argparse  # 用于解析命令行参数
-import os  # 用于文件和目录操作
+import argparse
+import os
 import pandas as pd
 import numpy as np
 from shapely.geometry import Polygon
 from skimage.io import imread, imsave
 from skimage.transform import resize, rotate
-import re  # 用于正则表达式解析
+import re
 
-# 从自定义utils模块导入工具函数
 from utils import (
         load_image, save_image, read_string, write_string,
         load_tsv, save_tsv)
+
 
 
 def get_image_filename(prefix):
@@ -35,91 +35,6 @@ def get_image_filename(prefix):
     return filename
 
 
-def extract_and_resize_cell(image, polygon, scale_factor, cell_size, neighborhood_size):
-    """
-    提取并缩放细胞图像及其邻域图像
-    参数:
-        image: 原始图像
-        polygon: 多边形坐标
-        scale_factor: 邻域扩展倍数
-        cell_size: 细胞图像目标尺寸
-        neighborhood_size: 邻域图像目标尺寸
-    返回:
-        cell_image: 缩放后的细胞图像
-        neighborhood_image: 缩放后的邻域图像
-    """
-    # 获取多边形的边界框
-    min_x, min_y, max_x, max_y = polygon.bounds
-    
-    # 检查多边形是否有效（面积非零）
-    if polygon.is_empty or polygon.area <= 0:
-        raise ValueError("无效的多边形: 面积为零或为空")
-    
-    # 检查边界框是否有效
-    cell_width = max_x - min_x
-    cell_height = max_y - min_y
-    
-    if cell_width <= 0 or cell_height <= 0:
-        raise ValueError(f"无效的多边形边界框: 宽度={cell_width}, 高度={cell_height}")
-    
-    # 确保边界框完全在图像内
-    min_x = max(0, int(min_x))
-    min_y = max(0, int(min_y))
-    max_x = min(image.shape[1]-1, int(max_x))
-    max_y = min(image.shape[0]-1, int(max_y))
-    
-    # 再次检查边界框大小是否合法
-    if min_x >= max_x or min_y >= max_y:
-        # 如果边界框无效，创建一个简单的填充图像而不是抛出错误
-        print(f"警告: 无效的多边形边界 [{min_x}, {min_y}, {max_x}, {max_y}], 使用填充图像代替")
-        cell_image = np.zeros((cell_size, cell_size, 3), dtype=np.uint8)
-        neighborhood_image = np.zeros((neighborhood_size, neighborhood_size, 3), dtype=np.uint8)
-        return cell_image, neighborhood_image
-    
-    # 扩展邻域边界
-    neighborhood_min_x = max(0, int(min_x - cell_width * scale_factor))
-    neighborhood_min_y = max(0, int(min_y - cell_height * scale_factor))
-    neighborhood_max_x = min(image.shape[1]-1, int(max_x + cell_width * scale_factor))
-    neighborhood_max_y = min(image.shape[0]-1, int(max_y + cell_height * scale_factor))
-    
-    # 确保邻域边界框也是有效的
-    if neighborhood_min_x >= neighborhood_max_x or neighborhood_min_y >= neighborhood_max_y:
-        print(f"警告: 无效的邻域边界 [{neighborhood_min_x}, {neighborhood_min_y}, {neighborhood_max_x}, {neighborhood_max_y}], 使用填充图像代替")
-        cell_image = np.zeros((cell_size, cell_size, 3), dtype=np.uint8)
-        neighborhood_image = np.zeros((neighborhood_size, neighborhood_size, 3), dtype=np.uint8)
-        return cell_image, neighborhood_image
-    
-    # 提取细胞区域和邻域区域
-    cell_image = image[min_y:max_y, min_x:max_x]
-    neighborhood_image = image[neighborhood_min_y:neighborhood_max_y, neighborhood_min_x:neighborhood_max_x]
-    
-    # 确保提取的图像不为空
-    if cell_image.size == 0 or neighborhood_image.size == 0:
-        print(f"警告: 提取的图像为空，使用填充图像代替")
-        cell_image = np.zeros((cell_size, cell_size, 3), dtype=np.uint8)
-        neighborhood_image = np.zeros((neighborhood_size, neighborhood_size, 3), dtype=np.uint8)
-        return cell_image, neighborhood_image
-    
-    # 安全地缩放图像，处理特殊情况
-    try:
-        # 检查图像是否至少有1个像素
-        if cell_image.shape[0] > 0 and cell_image.shape[1] > 0:
-            resized_cell_image = resize(cell_image, (cell_size, cell_size), preserve_range=True).astype(np.uint8)
-        else:
-            resized_cell_image = np.zeros((cell_size, cell_size, 3), dtype=np.uint8)
-            
-        if neighborhood_image.shape[0] > 0 and neighborhood_image.shape[1] > 0:
-            resized_neighborhood_image = resize(neighborhood_image, (neighborhood_size, neighborhood_size), preserve_range=True).astype(np.uint8)
-        else:
-            resized_neighborhood_image = np.zeros((neighborhood_size, neighborhood_size, 3), dtype=np.uint8)
-    except Exception as e:
-        print(f"缩放图像时出错: {e}, 使用填充图像代替")
-        resized_cell_image = np.zeros((cell_size, cell_size, 3), dtype=np.uint8)
-        resized_neighborhood_image = np.zeros((neighborhood_size, neighborhood_size, 3), dtype=np.uint8)
-    
-    return resized_cell_image, resized_neighborhood_image
-
-
 def parse_polygon(polygon_str):
     """
     解析多边形字符串
@@ -142,32 +57,69 @@ def parse_polygon(polygon_str):
             # 去掉括号并分割 x 和 y 坐标
             point = point.replace('(', '').replace(')', '')
             x, y = map(float, point.split())
-            points.append((x, y))
+            # 缩放坐标
+            x_scaled = x * scale
+            y_scaled = y * scale
+            points.append((x_scaled, y_scaled))
     return Polygon(points)
 
 
-def process_cells(image_path, cells_data_path, output_dir_cell, output_dir_neighborhood, start_cell_id=None):
+def extract_256_image(image, polygon):
+    """
+    根据多边形中心提取 256*256 的细胞图像，超出边界用 0 填充
+    参数:
+        image: 原始图像
+        polygon: 多边形坐标
+    返回:
+        256*256 的细胞图像
+    """
+    # 获取多边形的中心
+    center_x, center_y = polygon.centroid.x, polygon.centroid.y
+    
+    # 计算提取区域的边界
+    half_size = 128
+    start_x = int(center_x - half_size)
+    start_y = int(center_y - half_size)
+    end_x = start_x + 256
+    end_y = start_y + 256
+    
+    # 创建一个全零的 256*256 图像
+    extracted_image = np.zeros((256, 256, image.shape[2]), dtype=image.dtype)
+    
+    # 计算在原始图像中的有效区域
+    valid_start_x = max(0, start_x)
+    valid_start_y = max(0, start_y)
+    valid_end_x = min(image.shape[1], end_x)
+    valid_end_y = min(image.shape[0], end_y)
+    
+    # 计算在提取图像中的对应区域
+    extract_start_x = valid_start_x - start_x
+    extract_start_y = valid_start_y - start_y
+    extract_end_x = extract_start_x + (valid_end_x - valid_start_x)
+    extract_end_y = extract_start_y + (valid_end_y - valid_start_y)
+    
+    # 复制有效区域到提取图像中
+    extracted_image[extract_start_y:extract_end_y, extract_start_x:extract_end_x] = image[valid_start_y:valid_end_y, valid_start_x:valid_end_x]
+    
+    return extracted_image
+
+
+def process_cells(image_path, cells_data_path, output_dir):
     """
     处理所有细胞图像
     参数:
         image_path: 原始图像路径
         cells_data_path: 细胞数据CSV文件路径
-        output_dir_cell: 细胞图像输出目录
-        output_dir_neighborhood: 邻域图像输出目录
-        start_cell_id: 可选，从指定的细胞ID开始处理，用于恢复中断的处理
+        output_dir: 输出目录
     """
     # 创建输出目录
-    os.makedirs(output_dir_cell, exist_ok=True)
-    os.makedirs(output_dir_neighborhood, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     
     # 读取原始图像
     image = imread(image_path)
     
     # 读取细胞数据
     cells_data = pd.read_csv(cells_data_path, skiprows=1, names=['geometry', 'id'])
-    
-    # 如果指定了start_cell_id，找到对应的索引位置
-    start_processing = False if start_cell_id else True
     
     # 处理每个细胞
     processed_count = 0
@@ -176,32 +128,17 @@ def process_cells(image_path, cells_data_path, output_dir_cell, output_dir_neigh
     for _, row in cells_data.iterrows():
         cell_id = row['id']
         
-        # 检查是否应该开始处理
-        if not start_processing:
-            if cell_id == start_cell_id:
-                start_processing = True
-                print(f"从细胞ID {start_cell_id} 开始处理...")
-            else:
-                continue
-        
         try:
             # 解析多边形坐标
             polygon = parse_polygon(row['geometry'])
             
-            # 提取并缩放细胞图像及其邻域图像
-            cell_image, neighborhood_image = extract_and_resize_cell(image, polygon, scale_factor=16, cell_size=16, neighborhood_size=256)
-            
-             # 对细胞图像和邻域图像进行垂直翻转和顺时针旋转90度
+            # 提取 256*256 的细胞图像
+            cell_image = extract_256_image(image, polygon)
             #cell_image = np.flipud(cell_image)
             #cell_image = np.fliplr(cell_image)
             cell_image = rotate(cell_image, -90, resize=True, mode='reflect', preserve_range=True).astype(np.uint8)  # 顺时针旋转90度
-            #neighborhood_image = np.flipud(neighborhood_image)  # 垂直翻转
-            #neighborhood_image = np.fliplr(neighborhood_image)
-            neighborhood_image = rotate(neighborhood_image, -90, resize=True, mode='reflect', preserve_range=True).astype(np.uint8)  # 顺时针旋转90度
-        
             # 保存图像
-            imsave(os.path.join(output_dir_cell, f"{cell_id}_16.tif"), cell_image)
-            imsave(os.path.join(output_dir_neighborhood, f"{cell_id}_256.tif"), neighborhood_image)
+            imsave(os.path.join(output_dir, f"{cell_id}_256.tif"), cell_image)
             processed_count += 1
             
             # 每处理100个细胞输出一次进度
@@ -218,30 +155,47 @@ def process_cells(image_path, cells_data_path, output_dir_cell, output_dir_neigh
     print(f"处理完成，共处理 {processed_count} 个细胞，遇到 {error_count} 个错误")
 
 
+def test_image_transformation(input_path, output_path):
+    """
+    测试图像翻转和旋转功能
+    """
+    image = imread(input_path)
+    transformed_image = np.fliplr(image)
+    transformed_image = rotate(transformed_image, 90, resize=True, mode='reflect', preserve_range=True).astype(np.uint8)
+    imsave(output_path, transformed_image)
+
 def get_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--image', type=str, required=True,
-                      help='输入图像路径')
-    parser.add_argument('--cells', type=str, required=True,
-                      help='细胞数据CSV文件路径')
-    parser.add_argument('--output-dir', type=str, required=True,
-                      help='输出目录')
-    parser.add_argument('--start-from', type=str, default=None,
-                      help='从指定的细胞ID开始处理，用于恢复中断的处理')
+    parser.add_argument('--image', type=str, help='输入图像路径')
+    parser.add_argument('--cells', type=str, help='细胞数据CSV文件路径')
+    parser.add_argument('--output-dir', type=str, help='输出目录')
+    parser.add_argument('--test-image', type=str, help='测试图像路径')
+    # 添加新的参数 pixel_size_raw
+    parser.add_argument('--pixel-size-raw', type=float, help='原始像素大小', required=True)
     return parser.parse_args()
 
 
 def main():
     """主函数，协调整个处理流程"""
     args = get_args()
-    
-    # 创建细胞图像和邻域图像的输出目录
-    output_dir_cell = os.path.join(args.output_dir, 'cells_16')
-    output_dir_neighborhood = os.path.join(args.output_dir, 'cells_256')
-    
-    # 处理细胞图像及其邻域图像
-    process_cells(args.image, args.cells, output_dir_cell, output_dir_neighborhood, args.start_from)
+    # 从命令行参数获取 pixel_size_raw
+    pixel_size_raw = args.pixel_size_raw
+    pixel_size = float(0.5)
+    scale = pixel_size_raw / pixel_size
+
+    # 在全局作用域中设置 scale
+    global scale
+    scale = scale
+
+    if args.test_image:
+        test_image_transformation(args.test_image, "output.png")
+        print("测试图像已保存为 output.png")
+    elif args.image and args.cells and args.output_dir:
+        # 处理细胞图像
+        process_cells(args.image, args.cells, args.output_dir)
+    else:
+        print("请提供必要的参数，使用 --test-image 进行测试，或提供 --image、--cells 和 --output-dir 进行细胞图像处理。")
 
 
 if __name__ == '__main__':

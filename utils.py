@@ -1,38 +1,25 @@
-# 导入必要的库
-import itertools  # 迭代工具
-from PIL import Image  # 图像处理
-import pickle  # 数据序列化
-import os  # 操作系统接口
+import itertools
+from PIL import Image
+import pickle
+import os
 
-import numpy as np  # 数值计算
-import pandas as pd  # 数据处理
-import yaml  # YAML文件处理
+import numpy as np 
+import pandas as pd 
+import yaml
 
 
-# 设置PIL不限制图像像素大小
 Image.MAX_IMAGE_PIXELS = None
 
 
 def mkdir(path):
-    """
-    创建目录(如果不存在)
-    参数:
-        path: 目录路径
-    """
+
     dirname = os.path.dirname(path)
     if dirname != '':
         os.makedirs(dirname, exist_ok=True)
 
 
 def load_image(filename, verbose=True):
-    """
-    加载图像文件
-    参数:
-        filename: 图像文件路径
-        verbose: 是否打印加载信息
-    返回:
-        numpy数组格式的图像数据
-    """
+
     img = Image.open(filename)
     img = np.array(img)
     if img.ndim == 3 and img.shape[-1] == 4:

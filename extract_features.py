@@ -11,35 +11,21 @@ import pandas as pd
 import anndata as ad
 
 from utils import load_image
-from hipt_model_utils import eval_transforms
-from hipt_4k import HIPT_4K
 from utils import load_pickle, save_pickle, join
 from PIL import Image
 from einops import rearrange
 
-# Torch Dependencies
-import torch
 import torch.multiprocessing
 from torchvision import transforms
 
-# Local Dependencies
-# from hipt_heatmap_utils import *
 from hipt_model_utils import (
     get_vit256,
-    get_vit4k,
     tensorbatch2im,
-    eval_transforms,
+    eval_transforms
 )
 
 def load_cell_ids(prefix, h5ad_file=None):
-    """
-    从h5ad文件加载细胞ID或从图像目录加载所有细胞ID
-    参数:
-        prefix: 数据目录前缀
-        h5ad_file: 包含细胞ID的h5ad文件路径（可选）
-    返回:
-        cell_ids: 细胞ID列表
-    """
+
     if h5ad_file:
         print(f"从h5ad文件读取细胞ID: {h5ad_file}")
         adata = ad.read_h5ad(h5ad_file)
@@ -93,32 +79,40 @@ def extract_and_process_features(model, embs_256, args):
     
     features = {}
     with torch.no_grad():
-        # 批量处理图像
         imgs = torch.stack([eval_transforms()(img) for img in embs_256]).to(args.device)
         fea_all256 = model.forward_all(imgs).cpu()
-        cls_features = fea_all256[:, 0].numpy()  # 直接获取 [B, 384] 形状的 cls 特征
-        # sub_feat = fea_all256[:, 1:] 
+        cls_features = fea_all256[:, 0].numpy()  
+        sub_feat = fea_all256[:, 1:]
+        start_h = (16 - 2) // 2
+        start_w = (16 - 2) // 2
+        middle_patches = sub_feat[:, start_h:start_h+2, start_w:start_w+2, :]
+        middle_patches = rearrange(middle_patches, 'b h w c -> b c h w')
+        sub_features = reduce(middle_patches, 'b c h w -> b c', 'mean')
+        sub_features = rearrange(sub_features, 'b (c1 c2) -> b c1 c2', c2=2)
+        sub_features = reduce(sub_features, 'b c1 c2 -> b c1', 'mean')
+        sub_features = sub_features.numpy()
+        fused_features = np.concatenate((cls_features, sub_features), axis=1)
         features['cls'] = cls_features
-        # features['sub'] = sub_feat
+        features['sub'] = sub_features
+        features['fused'] = fused_features
 
     print("特征提取完成。")
     print(f"cls特征形状: {features['cls'].shape} - (细胞数量, 384)")
-    # print(f"sub特征形状: {features['sub'].shape} - (细胞数量, ...)")
-    
+    print(f"sub特征形状: {features['sub'].shape} - (细胞数量, 192)")
+    print(f"融合特征形状: {features['fused'].shape} - (细胞数量, 576)")
+
     return features
 
 def save_batch_features(features, cell_ids, output_prefix, batch_idx):
-    # 假设 features 是一个字典，包含 'cls' 和 'sub' 键
+
     cls_features = features['cls']
-    # sub_features = features['sub']
+    sub_features = features['sub']
 
-    # 创建保存目录
     cls_folder = os.path.join(output_prefix, 'embedd', 'cls')
-    # sub_folder = os.path.join(output_prefix, 'embedd', 'sub')
+    sub_folder = os.path.join(output_prefix, 'embedd', 'sub')
     os.makedirs(cls_folder, exist_ok=True)
-    # os.makedirs(sub_folder, exist_ok=True)
+    os.makedirs(sub_folder, exist_ok=True)
 
-    # 保存 cls 特征
     cls_data = {
         'cell_ids': cell_ids,
         'features': cls_features
@@ -128,15 +122,25 @@ def save_batch_features(features, cell_ids, output_prefix, batch_idx):
         pickle.dump(cls_data, f)
     print(f"批次 {batch_idx} 的 cls 特征已保存到: {cls_output_file}")
 
-    # 保存 sub 特征
-    # sub_data = {
-    #     'cell_ids': cell_ids,
-    #     'features': sub_features
-    # }
-    # sub_output_file = os.path.join(sub_folder, f"batch_{batch_idx:04d}_sub.pickle")
-    # with open(sub_output_file, 'wb') as f:
-    #     pickle.dump(sub_data, f)
-    # print(f"批次 {batch_idx} 的 sub 特征已保存到: {sub_output_file}")
+    sub_data = {
+        'cell_ids': cell_ids,
+        'features': sub_features
+    }
+    sub_output_file = os.path.join(sub_folder, f"batch_{batch_idx:04d}_sub.pickle")
+    with open(sub_output_file, 'wb') as f:
+        pickle.dump(sub_data, f)
+    print(f"批次 {batch_idx} 的 sub 特征已保存到: {sub_output_file}")
+
+    fused_data = {
+        'cell_ids': cell_ids,
+        'features': fused_features
+    }
+    fused_folder = os.path.join(output_prefix, 'embedd', 'fused')
+    os.makedirs(fused_folder, exist_ok=True)
+    fused_output_file = os.path.join(fused_folder, f"batch_{batch_idx:04d}_fused.pickle")
+    with open(fused_output_file, 'wb') as f:
+        pickle.dump(fused_data, f)
+    print(f"批次 {batch_idx} 的融合特征已保存到: {fused_output_file}")
 
 def get_args():
     """解析命令行参数"""
@@ -152,8 +156,6 @@ def get_args():
     parser.add_argument('--model256-path', type=str, 
                       default='checkpoints/vit256_small_dino.pth',
                       help='ViT-256模型权重路径')
-    parser.add_argument('--use-cache', action='store_true')
-    parser.add_argument('--plot', action='store_true')
     return parser.parse_args()
 
 def main():
@@ -183,13 +185,6 @@ def main():
         
         if not os.path.exists(model256_path):
             raise FileNotFoundError(f"找不到ViT-256模型权重文件: {model256_path}")
-    
-    try:
-        model256 = get_vit256(pretrained_weights=model256_path, device=device)
-        print("ViT-256 模型加载成功")
-    except Exception as e:
-        print(f"模型加载失败: {str(e)}")
-        raise
 
     output_prefix = args.prefix
     print(f"\n开始处理数据...")
@@ -199,8 +194,7 @@ def main():
 
         embs_256, batch_cell_ids = get_data_batch(
             args.prefix, cell_ids, batch_idx, args.batch_size)
-        
-        # 调用合并后的特征提取函数
+
         features = extract_and_process_features(model256, embs_256, args)
 
         save_batch_features(features, batch_cell_ids, output_prefix, batch_idx)
@@ -211,7 +205,7 @@ def main():
         print(f"批次 {batch_idx+1} 处理完成")
 
     print(f"\n所有数据处理完成")
-    print(f"特征已保存到: {os.path.join(output_prefix, 'embedd', 'cls')} 目录中")
+    print(f"特征已保存到: {os.path.join(output_prefix, 'embedd')} 目录中")
 
 if __name__ == '__main__':
     main()
