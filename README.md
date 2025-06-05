@@ -3,8 +3,22 @@
 本方法用于从细胞图像预测基因表达量。基于ViT模型，从细胞图像中提取特征，然后使用这些特征来预测细胞的基因表达谱。
 
 ## 目录结构
+project-name/
+│
+├── dir1/
+│   ├── file1.ext
+│   └── file2.ext
+│
+├── dir2/
+│   ├── sub-dir1/
+│   │   └── file3.ext
+│   └── sub-dir2/
+│
+└── dir3/
+    ├── file4.ext
+    └── file5.ext
 
-├── main\  // 主程序文件夹
+├── main  // 主程序文件夹
 │   ├── preprocess_image.py  // 用于预处理图像的Python脚本
 │   ├── rescale.py  // 用于图像缩放的Python脚本
 │   ├── extract_features.py  // 用于从细胞图像中提取特征的Python脚本
@@ -36,10 +50,16 @@
 ### 1. 预处理和缩放图像
 ```bash
 
-python preprocess_image.py --valid_path <验证图像路径> --train_path <训练图像路径> --output_path <输出图像路径>
+python preprocess_image.py \
+    --valid_path <验证图像路径> \
+    --train_path <训练图像路径> \
+    --output_path <输出图像路径>
+```
 
-# 缩放图像
-python rescale.py --prefix <文件路径前缀>
+```bash
+
+python rescale.py \
+    --prefix <文件路径前缀>
 ```
 
 ### 2. 特征提取
