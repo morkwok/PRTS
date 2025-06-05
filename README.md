@@ -4,31 +4,31 @@
 
 ## 目录结构
 
-├── main\           // 主程序文件夹  
-│   ├── preprocess_image.py             // 用于预处理图像的Python脚本  
-│   ├── rescale.py              // 用于图像缩放的Python脚本  
-│   ├── extract_features.py             // 用于从细胞图像中提取特征的Python脚本  
-│   ├── merge_features.py           // 用于合并特征的Python脚本  
-│   ├── train_model.py              // 用于训练模型的Python脚本  
-│   ├── predict_expression.py           // 用于预测基因表达量的Python脚本  
-│   ├── model_utils.py             // 与HIPT模型相关的工具函数脚本  
-│   ├── utils.py            // 通用工具函数脚本  
-│   ├── vision_transformer.py           // 视觉Transformer相关的脚本  
-│   ├── README.md           // 主程序文件夹的说明文档  
-│   ├── requirements.txt            // 项目依赖文件  
-│   └── work\           // 工作目录，包含各种分析和可视化脚本  
-│       ├── Before train\           // 训练前相关脚本目录示例  
-│       │   ├── Before train.py             // 训练前的分析脚本  
-│       │   ├── Before train2.py            // 训练前的分析脚本2  
-│       │   ├── Before train3.py            // 训练前的分析脚本3  
-│       │   ├── Before train4.py            // 训练前的分析脚本4  
-│       │   ├── Validation dataset.py           // 验证数据集分析脚本  
-│       │   └── Validation dataset 2.py             // 验证数据集分析脚本2  
+├── main\    // 主程序文件夹  
+│   ├── preprocess_image.py    // 用于预处理图像的Python脚本  
+│   ├── rescale.py    // 用于图像缩放的Python脚本  
+│   ├── extract_features.py    // 用于从细胞图像中提取特征的Python脚本  
+│   ├── merge_features.py    // 用于合并特征的Python脚本  
+│   ├── train_model.py    // 用于训练模型的Python脚本  
+│   ├── predict_expression.py    // 用于预测基因表达量的Python脚本  
+│   ├── model_utils.py    // 与HIPT模型相关的工具函数脚本  
+│   ├── utils.py    // 通用工具函数脚本  
+│   ├── vision_transformer.py    // 视觉Transformer相关的脚本  
+│   ├── README.md    // 说明文档  
+│   ├── requirements.txt    // 项目依赖文件  
+│   └── work\    // 各种分析和可视化脚本  
+│       ├── Before train\    // 训练前相关脚本   
+│       │   ├── Before train.py    // 训练前的分析脚本  
+│       │   ├── Before train2.py    // 训练前的分析脚本2  
+│       │   ├── Before train3.py    // 训练前的分析脚本3  
+│       │   ├── Before train4.py    // 训练前的分析脚本4  
+│       │   ├── Validation dataset.py    // 验证数据集分析脚本  
+│       │   └── Validation dataset 2.py    // 验证数据集分析脚本2  
 │       ├── IHC\  
-│       │   ├── IHC-A-cell segmentation.py              // IHC-A 区域细胞分割脚本  
-│       │   ├── IHC-A-expression.py             // IHC-A 区域基因表达脚本  
-│       │   ├── IHC-B-cell segmentation.py              // IHC-B 区域细胞分割脚本  
-│       │   └── IHC-B-expression.py             // IHC-B 区域基因表达脚本  
+│       │   ├── IHC-A-cell segmentation.py    // IHC-A 区域细胞分割脚本  
+│       │   ├── IHC-A-expression.py    // IHC-A 区域基因表达脚本  
+│       │   ├── IHC-B-cell segmentation.py    // IHC-B 区域细胞分割脚本  
+│       │   └── IHC-B-expression.py    // IHC-B 区域基因表达脚本  
 │       └── ...  
 
 ## 使用方法
@@ -37,15 +37,15 @@
 ```bash
 
 python preprocess_image.py \
-    --valid_path <验证图像路径> \
-    --train_path <训练图像路径> \
-    --output_path <输出图像路径>
+    --valid_path /path/to/images/ \
+    --train_path /path/to/images/ \
+    --output_path /path/to/images/
 ```
 
 ```bash
 
 python rescale.py \
-    --prefix <文件路径前缀>
+    --prefix /path/to/images/
 ```
 
 ### 2. 特征提取
