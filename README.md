@@ -3,46 +3,32 @@
 本方法用于从细胞图像预测基因表达量。基于ViT模型，从细胞图像中提取特征，然后使用这些特征来预测细胞的基因表达谱。
 
 ## 目录结构
-project-name/
-│
-├── dir1/
-│   ├── file1.ext
-│   └── file2.ext
-│
-├── dir2/
-│   ├── sub-dir1/
-│   │   └── file3.ext
-│   └── sub-dir2/
-│
-└── dir3/
-    ├── file4.ext
-    └── file5.ext
 
-├── main\  // 主程序文件夹  
-│   ├── preprocess_image.py  // 用于预处理图像的Python脚本  
-│   ├── rescale.py  // 用于图像缩放的Python脚本  
-│   ├── extract_features.py  // 用于从细胞图像中提取特征的Python脚本  
-│   ├── merge_features.py  // 用于合并特征的Python脚本  
-│   ├── train_model.py  // 用于训练模型的Python脚本  
-│   ├── predict_expression.py  // 用于预测基因表达量的Python脚本  
-│   ├── hipt_model_utils.py  // 与HIPT模型相关的工具函数脚本  
-│   ├── utils.py  // 通用工具函数脚本  
-│   ├── vision_transformer.py  // 视觉Transformer相关的脚本  
-│   ├── README.md  // 主程序文件夹的说明文档  
-│   ├── requirements.txt  // 项目依赖文件  
-│   └── work\  // 工作目录，包含各种分析和可视化脚本  
-│       ├── Before train\  // 训练前相关脚本目录示例  
-│       │   ├── Before train.py  // 训练前的分析脚本  
-│       │   ├── Before train2.py  // 训练前的分析脚本2  
-│       │   ├── Before train3.py  // 训练前的分析脚本3  
-│       │   ├── Before train4.py  // 训练前的分析脚本4  
-│       │   ├── Validation dataset.py  // 验证数据集分析脚本  
-│       │   └── Validation dataset 2.py  // 验证数据集分析脚本2  
+├── main\           // 主程序文件夹  
+│   ├── preprocess_image.py             // 用于预处理图像的Python脚本  
+│   ├── rescale.py              // 用于图像缩放的Python脚本  
+│   ├── extract_features.py             // 用于从细胞图像中提取特征的Python脚本  
+│   ├── merge_features.py           // 用于合并特征的Python脚本  
+│   ├── train_model.py              // 用于训练模型的Python脚本  
+│   ├── predict_expression.py           // 用于预测基因表达量的Python脚本  
+│   ├── model_utils.py             // 与HIPT模型相关的工具函数脚本  
+│   ├── utils.py            // 通用工具函数脚本  
+│   ├── vision_transformer.py           // 视觉Transformer相关的脚本  
+│   ├── README.md           // 主程序文件夹的说明文档  
+│   ├── requirements.txt            // 项目依赖文件  
+│   └── work\           // 工作目录，包含各种分析和可视化脚本  
+│       ├── Before train\           // 训练前相关脚本目录示例  
+│       │   ├── Before train.py             // 训练前的分析脚本  
+│       │   ├── Before train2.py            // 训练前的分析脚本2  
+│       │   ├── Before train3.py            // 训练前的分析脚本3  
+│       │   ├── Before train4.py            // 训练前的分析脚本4  
+│       │   ├── Validation dataset.py           // 验证数据集分析脚本  
+│       │   └── Validation dataset 2.py             // 验证数据集分析脚本2  
 │       ├── IHC\  
-│       │   ├── IHC-A-cell segmentation.py  // IHC-A 区域细胞分割脚本  
-│       │   ├── IHC-A-expression.py  // IHC-A 区域基因表达脚本  
-│       │   ├── IHC-B-cell segmentation.py  // IHC-B 区域细胞分割脚本  
-│       │   └── IHC-B-expression.py  // IHC-B 区域基因表达脚本  
+│       │   ├── IHC-A-cell segmentation.py              // IHC-A 区域细胞分割脚本  
+│       │   ├── IHC-A-expression.py             // IHC-A 区域基因表达脚本  
+│       │   ├── IHC-B-cell segmentation.py              // IHC-B 区域细胞分割脚本  
+│       │   └── IHC-B-expression.py             // IHC-B 区域基因表达脚本  
 │       └── ...  
 
 ## 使用方法

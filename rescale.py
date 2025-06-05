@@ -7,10 +7,6 @@ from skimage.io import imread, imsave
 from skimage.transform import resize, rotate
 import re
 
-from utils import (
-        load_image, save_image, read_string, write_string,
-        load_tsv, save_tsv)
-
 
 
 def get_image_filename(prefix):

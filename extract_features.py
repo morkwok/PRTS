@@ -18,7 +18,7 @@ from einops import rearrange
 import torch.multiprocessing
 from torchvision import transforms
 
-from hipt_model_utils import (
+from model_utils import (
     get_vit256,
     tensorbatch2im,
     eval_transforms
