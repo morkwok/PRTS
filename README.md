@@ -1,4 +1,4 @@
-# Cell-level Gene Expression Prediction
+# Gene Expression Prediction
 
 This method is used to predict gene expression from histological cell images. It is based on Vision Transformer (ViT) models to extract features from cell images and then uses these features to predict the gene expression profiles of cells.
 
