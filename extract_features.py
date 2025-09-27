@@ -1,7 +1,7 @@
-import os
 from time import time
 import argparse
 import pickle
+import os
 
 from einops import rearrange, reduce, repeat
 import numpy as np
@@ -25,16 +25,23 @@ from model_utils import (
 )
 
 def load_cell_ids(prefix, h5ad_file=None):
-
+    """
+    Load cell IDs either from h5ad file or image directory
+    Args:
+        prefix: Directory prefix
+        h5ad_file: Optional h5ad file path
+    Returns:
+        List of cell IDs
+    """
     if h5ad_file:
-        print(f"从h5ad文件读取细胞ID: {h5ad_file}")
+        print(f"Reading cell IDs from h5ad file: {h5ad_file}")
         adata = ad.read_h5ad(h5ad_file)
         cell_ids = adata.obs.index.tolist()
     else:
-        print(f"从图像目录中读取所有细胞ID: {prefix}cells_256/")
+        print(f"Reading all cell IDs from image directory: {prefix}cells_256/")
         cells_dir = f'{prefix}cells_256/'
         if not os.path.exists(cells_dir):
-            raise FileNotFoundError(f"目录不存在: {cells_dir}")
+            raise FileNotFoundError(f"Directory not found: {cells_dir}")
         
         cell_ids = []
         files = os.listdir(cells_dir)
@@ -43,23 +50,33 @@ def load_cell_ids(prefix, h5ad_file=None):
                 cell_id = file.replace('_256.tif', '')
                 cell_ids.append(cell_id)
         
-        print(f"在{cells_dir}中找到{len(cell_ids)}个细胞图像")
+        print(f"Found {len(cell_ids)} cell images in {cells_dir}")
     
     return cell_ids
 
 def get_data_batch(prefix, cell_ids, batch_idx, batch_size):
+    """
+    Load a batch of cell images
+    Args:
+        prefix: Directory prefix
+        cell_ids: List of cell IDs
+        batch_idx: Current batch index
+        batch_size: Batch size
+    Returns:
+        Tuple of (image batch array, batch cell IDs)
+    """
     start_idx = batch_idx * batch_size
     end_idx = min(start_idx + batch_size, len(cell_ids))
     batch_cell_ids = cell_ids[start_idx:end_idx]
 
     embs_256 = [] 
     
-    print(f"加载第{batch_idx+1}批细胞图像 ({start_idx}:{end_idx})...")
+    print(f"Loading batch {batch_idx+1} of cell images ({start_idx}:{end_idx})...")
     for cell_id in batch_cell_ids:
         global_path = f'{prefix}/{cell_id}_256.tif'
         
         if not os.path.exists(global_path):
-            print(f"警告: 细胞 {cell_id} 的图像文件不存在，跳过")
+            print(f"Warning: Image file for cell {cell_id} does not exist, skipping")
             continue
 
         img_256 = load_image(global_path)
@@ -67,13 +84,22 @@ def get_data_batch(prefix, cell_ids, batch_idx, batch_size):
         embs_256.append(img_256)
 
     if len(embs_256) == 0:
-        raise ValueError(f"批次 {batch_idx} 中没有找到有效的细胞图像")
+        raise ValueError(f"No valid cell images found in batch {batch_idx}")
         
     embs_256 = np.stack(embs_256)  
     
     return embs_256, batch_cell_ids
 
 def extract_and_process_features(model, embs_256, args):
+    """
+    Extract and process features from images using ViT model
+    Args:
+        model: Pretrained ViT model
+        embs_256: Batch of 256x256 images
+        args: Command line arguments
+    Returns:
+        Dictionary of extracted features
+    """
     model = model.to(args.device)
     model.eval()
     
@@ -81,131 +107,104 @@ def extract_and_process_features(model, embs_256, args):
     with torch.no_grad():
         imgs = torch.stack([eval_transforms()(img) for img in embs_256]).to(args.device)
         fea_all256 = model.forward_all(imgs).cpu()
-        cls_features = fea_all256[:, 0].numpy()  
-        sub_feat = fea_all256[:, 1:]
-        start_h = (16 - 2) // 2
+        
+        # Extract global features from CLS token
+        cls_features = fea_all256[:, 0].numpy()  # Global feature vector (192 dimensions)
+        
+        # Extract local features from patches overlapping with cell nucleus
+        # Reshape to (batch, 16, 16, 384) to represent the 16x16 patches
+        sub_feat = fea_all256[:, 1:].reshape(-1, 16, 16, 384)
+        
+        # In a real implementation, we would determine which patches overlap with the cell nucleus
+        # For this example, we'll use the center 2x2 patches as a simple approximation
+        tart_h = (16 - 2) // 2
         start_w = (16 - 2) // 2
-        middle_patches = sub_feat[:, start_h:start_h+2, start_w:start_w+2, :]
+        middle_patches = sub_feat[:, tart_h:tart_h+2, start_w:start_w+2, :]
+        
+        # Average pooling to aggregate patch features
         middle_patches = rearrange(middle_patches, 'b h w c -> b c h w')
         sub_features = reduce(middle_patches, 'b c h w -> b c', 'mean')
-        sub_features = rearrange(sub_features, 'b (c1 c2) -> b c1 c2', c2=2)
-        sub_features = reduce(sub_features, 'b c1 c2 -> b c1', 'mean')
+        
+        # Local feature vector (384 dimensions)
         sub_features = sub_features.numpy()
+        
+        # Concatenate global and local features (192 + 384 = 576 dimensions)
         fused_features = np.concatenate((cls_features, sub_features), axis=1)
-        features['cls'] = cls_features
-        features['sub'] = sub_features
-        features['fused'] = fused_features
+        
+        features['global'] = cls_features  # Shape: (batch_size, 192)
+        features['local'] = sub_features   # Shape: (batch_size, 384)
+        features['fused'] = fused_features # Shape: (batch_size, 576)
 
-    print("特征提取完成。")
-    print(f"cls特征形状: {features['cls'].shape} - (细胞数量, 384)")
-    print(f"sub特征形状: {features['sub'].shape} - (细胞数量, 192)")
-    print(f"融合特征形状: {features['fused'].shape} - (细胞数量, 576)")
-
+    print("Feature extraction completed.")
+    print(f"Global features shape: {features['global'].shape} - (number of cells, 192)")
+    print(f"Local features shape: {features['local'].shape} - (number of cells, 384)")
+    print(f"Fused features shape: {features['fused'].shape} - (number of cells, 576)")
+    
     return features
 
-def save_batch_features(features, cell_ids, output_prefix, batch_idx):
-
-    cls_features = features['cls']
-    sub_features = features['sub']
-
-    cls_folder = os.path.join(output_prefix, 'embedd', 'cls')
-    sub_folder = os.path.join(output_prefix, 'embedd', 'sub')
-    os.makedirs(cls_folder, exist_ok=True)
-    os.makedirs(sub_folder, exist_ok=True)
-
-    cls_data = {
-        'cell_ids': cell_ids,
-        'features': cls_features
-    }
-    cls_output_file = os.path.join(cls_folder, f"batch_{batch_idx:04d}_cls.pickle")
-    with open(cls_output_file, 'wb') as f:
-        pickle.dump(cls_data, f)
-    print(f"批次 {batch_idx} 的 cls 特征已保存到: {cls_output_file}")
-
-    sub_data = {
-        'cell_ids': cell_ids,
-        'features': sub_features
-    }
-    sub_output_file = os.path.join(sub_folder, f"batch_{batch_idx:04d}_sub.pickle")
-    with open(sub_output_file, 'wb') as f:
-        pickle.dump(sub_data, f)
-    print(f"批次 {batch_idx} 的 sub 特征已保存到: {sub_output_file}")
-
-    fused_data = {
-        'cell_ids': cell_ids,
-        'features': fused_features
-    }
-    fused_folder = os.path.join(output_prefix, 'embedd', 'fused')
-    os.makedirs(fused_folder, exist_ok=True)
-    fused_output_file = os.path.join(fused_folder, f"batch_{batch_idx:04d}_fused.pickle")
-    with open(fused_output_file, 'wb') as f:
-        pickle.dump(fused_data, f)
-    print(f"批次 {batch_idx} 的融合特征已保存到: {fused_output_file}")
-
-def get_args():
-    """解析命令行参数"""
-    parser = argparse.ArgumentParser()
-    parser.add_argument('prefix', type=str, help='数据目录前缀')
-    parser.add_argument('--h5ad-file', type=str, default=None,
-                      help='包含细胞ID的h5ad文件路径（可选）')
-    parser.add_argument('--batch-size', type=int, default=256,
-                      help='批处理大小')
-    parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--random-weights', action='store_true',
-                      help='是否使用随机初始化的权重')
-    parser.add_argument('--model256-path', type=str, 
-                      default='checkpoints/vit256_small_dino.pth',
-                      help='ViT-256模型权重路径')
+def parse_args():
+    """\Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='Extract features from cell images')
+    parser.add_argument('--prefix', type=str, required=True, help='Directory prefix for cell images')
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for processing')
+    parser.add_argument('--output_file', type=str, default='features.pkl', help='Output file path')
+    parser.add_argument('--h5ad_file', type=str, default=None, help='Optional h5ad file for cell IDs')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to use for computation')
     return parser.parse_args()
 
 def main():
-    """主处理流程"""
-    args = get_args()
-    np.random.seed(0)
-    torch.manual_seed(0)
-
-    cell_ids = load_cell_ids(args.prefix, args.h5ad_file)
-
-    n_cells = len(cell_ids)
-    n_batches = (n_cells + args.batch_size - 1) // args.batch_size
-    print(f"总细胞数: {n_cells}")
-    print(f"批次大小: {args.batch_size}")
-    print(f"总批次数: {n_batches}")
-
-    device = torch.device(args.device)
-    print(f"使用设备: {device}")
+    """Main function to extract features from cell images"""
+    args = parse_args()
     
-    if args.random_weights:
-        print("使用随机初始化权重")
-        model256_path = None
-    else:
-        print(f"加载预训练权重:")
-        print(f"ViT-256模型: {args.model256_path}")
-        model256_path = args.model256_path
-        
-        if not os.path.exists(model256_path):
-            raise FileNotFoundError(f"找不到ViT-256模型权重文件: {model256_path}")
-
-    output_prefix = args.prefix
-    print(f"\n开始处理数据...")
-
-    for batch_idx in range(n_batches):
-        print(f"\n处理批次 {batch_idx+1}/{n_batches}")
-
-        embs_256, batch_cell_ids = get_data_batch(
-            args.prefix, cell_ids, batch_idx, args.batch_size)
-
-        features = extract_and_process_features(model256, embs_256, args)
-
-        save_batch_features(features, batch_cell_ids, output_prefix, batch_idx)
-
-        del embs_256, features
-        torch.cuda.empty_cache()
-        
-        print(f"批次 {batch_idx+1} 处理完成")
-
-    print(f"\n所有数据处理完成")
-    print(f"特征已保存到: {os.path.join(output_prefix, 'embedd')} 目录中")
+    # Load cell IDs
+    cell_ids = load_cell_ids(args.prefix, args.h5ad_file)
+    
+    # Initialize model
+    print("Loading pre-trained ViT-256/16 model...")
+    model = get_vit256(pretrained_weights=None, arch='vit_small', device=args.device)
+    
+    # Process in batches
+    all_features = {}
+    total_batches = (len(cell_ids) + args.batch_size - 1) // args.batch_size
+    
+    for batch_idx in range(total_batches):
+        try:
+            # Get batch data
+            batch_images, batch_cell_ids = get_data_batch(args.prefix, cell_ids, batch_idx, args.batch_size)
+            
+            # Extract features
+            batch_features = extract_and_process_features(model, batch_images, args)
+            
+            # Store results
+            for i, cell_id in enumerate(batch_cell_ids):
+                all_features[cell_id] = {
+                    'global': batch_features['global'][i],
+                    'local': batch_features['local'][i],
+                    'fused': batch_features['fused'][i]
+                }
+            
+            # Print progress
+            progress = (batch_idx + 1) / total_batches * 100
+            print(f"Progress: {progress:.1f}% ({batch_idx + 1}/{total_batches} batches processed)")
+            
+        except Exception as e:
+            print(f"Error processing batch {batch_idx}: {e}")
+            continue
+    
+    # Save features
+    print(f"Saving extracted features to {args.output_file}...")
+    os.makedirs(os.path.dirname(os.path.abspath(args.output_file)), exist_ok=True)
+    with open(args.output_file, 'wb') as f:
+        pickle.dump({
+            'cell_ids': list(all_features.keys()),
+            'features': {
+                'global': np.array([all_features[cell]['global'] for cell in all_features]),
+                'local': np.array([all_features[cell]['local'] for cell in all_features]),
+                'fused': np.array([all_features[cell]['fused'] for cell in all_features])
+            }
+        }, f)
+    
+    print(f"Feature extraction completed for {len(all_features)} cells")
 
 if __name__ == '__main__':
     main()

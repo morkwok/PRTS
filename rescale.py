@@ -6,21 +6,23 @@ from shapely.geometry import Polygon
 from skimage.io import imread, imsave
 from skimage.transform import resize, rotate
 import re
+from PIL import Image
 
+TARGET_PIXEL_SIZE = 0.5
 
 
 def get_image_filename(prefix):
     """
-    根据前缀查找存在的图像文件
-    参数:
-        prefix: 文件路径前缀
-    返回:
-        找到的图像文件名
-    异常:
-        FileNotFoundError: 当找不到图像文件时抛出
+    Find existing image file based on prefix
+    Args:
+        prefix: File path prefix
+    Returns:
+        Found image filename
+    Raises:
+        FileNotFoundError: When no image file is found
     """
     file_exists = False
-    # 尝试常见图像后缀
+    # Try common image suffixes
     for suffix in ['.jpg', '.png', '.tiff']:
         filename = prefix + suffix
         if os.path.exists(filename):
@@ -31,16 +33,26 @@ def get_image_filename(prefix):
     return filename
 
 
+def calculate_rescale_factor(original_pixel_size):
+    """
+    Calculate the rescaling factor to achieve target pixel size
+    Args:
+        original_pixel_size: Original pixel size in μm
+    Returns:
+        Rescaling factor
+    """
+    return original_pixel_size / TARGET_PIXEL_SIZE
+
+
 def parse_polygon(polygon_str):
     """
-    解析多边形字符串
-    参数:
-        polygon_str: 多边形字符串，格式为 "POLYGON ((x1 y1, x2 y2, ..., xn yn))"
-    返回:
-        shapely.geometry.Polygon 对象
+    Parse polygon string and scale coordinates
+    Args:
+        polygon_str: Polygon string in format "POLYGON ((x1 y1, x2 y2, ..., xn yn))"
+    Returns:
+        shapely.geometry.Polygon object
     """
-    # 使用正则表达式提取坐标
-    # 匹配 POLYGON ((...)) 中的内容
+    # Extract coordinates using regular expressions
     match = re.search(r'POLYGON\s*\(\s*\(\s*(.*?)\s*\)\s*\)', polygon_str)
     if not match:
         raise ValueError("Invalid polygon format")
@@ -50,10 +62,10 @@ def parse_polygon(polygon_str):
     for point in coords.split(','):
         point = point.strip()
         if point:
-            # 去掉括号并分割 x 和 y 坐标
+            # Remove parentheses and split x and y coordinates
             point = point.replace('(', '').replace(')', '')
             x, y = map(float, point.split())
-            # 缩放坐标
+            # Scale coordinates
             x_scaled = x * scale
             y_scaled = y * scale
             points.append((x_scaled, y_scaled))
@@ -62,39 +74,39 @@ def parse_polygon(polygon_str):
 
 def extract_256_image(image, polygon):
     """
-    根据多边形中心提取 256*256 的细胞图像，超出边界用 0 填充
-    参数:
-        image: 原始图像
-        polygon: 多边形坐标
-    返回:
-        256*256 的细胞图像
+    Extract a 256*256 cell image based on polygon center, pad with 0 if out of bounds
+    Args:
+        image: Original image array
+        polygon: Polygon coordinates
+    Returns:
+        256*256 cell image array
     """
-    # 获取多边形的中心
+    # Get polygon center
     center_x, center_y = polygon.centroid.x, polygon.centroid.y
     
-    # 计算提取区域的边界
+    # Calculate extraction region boundaries
     half_size = 128
     start_x = int(center_x - half_size)
     start_y = int(center_y - half_size)
     end_x = start_x + 256
     end_y = start_y + 256
     
-    # 创建一个全零的 256*256 图像
+    # Create a zero-filled 256*256 image
     extracted_image = np.zeros((256, 256, image.shape[2]), dtype=image.dtype)
     
-    # 计算在原始图像中的有效区域
+    # Calculate valid region in the original image
     valid_start_x = max(0, start_x)
     valid_start_y = max(0, start_y)
     valid_end_x = min(image.shape[1], end_x)
     valid_end_y = min(image.shape[0], end_y)
     
-    # 计算在提取图像中的对应区域
+    # Calculate corresponding region in the extracted image
     extract_start_x = valid_start_x - start_x
     extract_start_y = valid_start_y - start_y
     extract_end_x = extract_start_x + (valid_end_x - valid_start_x)
     extract_end_y = extract_start_y + (valid_end_y - valid_start_y)
     
-    # 复制有效区域到提取图像中
+    # Copy valid region to the extracted image
     extracted_image[extract_start_y:extract_end_y, extract_start_x:extract_end_x] = image[valid_start_y:valid_end_y, valid_start_x:valid_end_x]
     
     return extracted_image
@@ -102,22 +114,22 @@ def extract_256_image(image, polygon):
 
 def process_cells(image_path, cells_data_path, output_dir):
     """
-    处理所有细胞图像
-    参数:
-        image_path: 原始图像路径
-        cells_data_path: 细胞数据CSV文件路径
-        output_dir: 输出目录
+    Process all cell images
+    Args:
+        image_path: Path to the original image
+        cells_data_path: Path to the cell data CSV file
+        output_dir: Output directory
     """
-    # 创建输出目录
+    # Create output directory
     os.makedirs(output_dir, exist_ok=True)
     
-    # 读取原始图像
+    # Read original image
     image = imread(image_path)
     
-    # 读取细胞数据
+    # Read cell data
     cells_data = pd.read_csv(cells_data_path, skiprows=1, names=['geometry', 'id'])
     
-    # 处理每个细胞
+    # Process each cell
     processed_count = 0
     error_count = 0
     
@@ -125,75 +137,77 @@ def process_cells(image_path, cells_data_path, output_dir):
         cell_id = row['id']
         
         try:
-            # 解析多边形坐标
+            # Parse polygon coordinates
             polygon = parse_polygon(row['geometry'])
             
-            # 提取 256*256 的细胞图像
+            # Extract 256*256 cell image
             cell_image = extract_256_image(image, polygon)
             #cell_image = np.flipud(cell_image)
             #cell_image = np.fliplr(cell_image)
-            cell_image = rotate(cell_image, -90, resize=True, mode='reflect', preserve_range=True).astype(np.uint8)  # 顺时针旋转90度
-            # 保存图像
+            #cell_image = rotate(cell_image, -90, resize=True, mode='reflect', preserve_range=True).astype(np.uint8)  # Rotate clockwise 90 degrees
+            # Save image
             imsave(os.path.join(output_dir, f"{cell_id}_256.tif"), cell_image)
             processed_count += 1
             
-            # 每处理100个细胞输出一次进度
+            # Output progress every 100 cells processed
             if processed_count % 100 == 0:
-                print(f"已处理 {processed_count} 个细胞，当前ID: {cell_id}...")
+                print(f"Processed {processed_count} cells, current ID: {cell_id}...")
         except Exception as e:
-            print(f"处理细胞 {cell_id} 时出错: {e}")
+            print(f"Error processing cell {cell_id}: {e}")
             error_count += 1
-            # 如果错误太多，退出处理
+            # If too many errors, exit processing
             if error_count > 100:
-                print("错误数量过多，停止处理")
+                print("Too many errors, stopping processing")
                 break
     
-    print(f"处理完成，共处理 {processed_count} 个细胞，遇到 {error_count} 个错误")
+    print(f"Processing completed, processed {processed_count} cells, encountered {error_count} errors")
 
 
 def test_image_transformation(input_path, output_path):
     """
-    测试图像翻转和旋转功能
+    Test image flipping and rotation functionality
     """
     image = imread(input_path)
     transformed_image = np.fliplr(image)
     transformed_image = rotate(transformed_image, 90, resize=True, mode='reflect', preserve_range=True).astype(np.uint8)
     imsave(output_path, transformed_image)
 
+
 def get_args():
-    """解析命令行参数"""
+    """Parse command line arguments"""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--image', type=str, help='输入图像路径')
-    parser.add_argument('--cells', type=str, help='细胞数据CSV文件路径')
-    parser.add_argument('--output-dir', type=str, help='输出目录')
-    parser.add_argument('--test-image', type=str, help='测试图像路径')
-    # 添加新的参数 pixel_size_raw
-    parser.add_argument('--pixel-size-raw', type=float, help='原始像素大小', required=True)
+    parser.add_argument('--image', type=str, help='Input image path')
+    parser.add_argument('--cells', type=str, help='Cell data CSV file path')
+    parser.add_argument('--output-dir', type=str, help='Output directory')
+    parser.add_argument('--test-image', type=str, help='Test image path')
+    # Add new parameter pixel_size_raw
+    parser.add_argument('--pixel-size-raw', type=float, help='Original pixel size', required=True)
     return parser.parse_args()
 
 
 def main():
-    """主函数，协调整个处理流程"""
+    """Main function, coordinate the entire processing flow"""
     args = get_args()
-    # 从命令行参数获取 pixel_size_raw
+
+    global scale
+    # Get pixel_size_raw from command line arguments
     pixel_size_raw = args.pixel_size_raw
     pixel_size = float(0.5)
     scale = pixel_size_raw / pixel_size
 
-    # 在全局作用域中设置 scale
-    global scale
-    scale = scale
+    # Set scale in global scope
+    
+    #scale = scale
 
     if args.test_image:
         test_image_transformation(args.test_image, "output.png")
-        print("测试图像已保存为 output.png")
+        print("Test image saved as output.png")
     elif args.image and args.cells and args.output_dir:
-        # 处理细胞图像
+        # Process cell images
         process_cells(args.image, args.cells, args.output_dir)
     else:
-        print("请提供必要的参数，使用 --test-image 进行测试，或提供 --image、--cells 和 --output-dir 进行细胞图像处理。")
+        print("Please provide necessary parameters, use --test-image for testing, or provide --image, --cells and --output-dir for cell image processing.")
 
 
-if __name__ == '__main__':
-    # 当脚本直接运行时执行main函数
+if __name__ == "__main__":
     main()

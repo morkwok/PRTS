@@ -1,212 +1,283 @@
-import sys
 import os
+import time
 import argparse
 import pickle
-
 import numpy as np
-import pandas as pd
-import anndata as ad
 import torch
-import torch.nn.functional as F
-import scipy.sparse as sp
+import anndata as ad
+from sklearn.preprocessing import StandardScaler
 
-def denormalize_expression(y_pred_normalized, y_min, y_range):
+from train_model import DualOutputMLP, CustomPytorchRegressor
 
-    y_denormalized = np.copy(y_pred_normalized)
-    for i in range(y_denormalized.shape[0]):
-        for j in range(y_denormalized.shape[1]):
-            if y_denormalized[i, j] > 0:
-                y_denormalized[i, j] = y_denormalized[i, j] * y_range[j] + y_min[j]
-    return y_denormalized
-
-
-def load_model(model_path, expected_genes, gene_list_file):
-    print(f"加载模型: {model_path}")
-    
-    if gene_list_file.endswith('.csv'):
-        gene_names = pd.read_csv(gene_list_file, header=None)[0].tolist()
-    else:
-        with open(gene_list_file, 'r') as f:
-            gene_names = [line.strip() for line in f]
-
-    if model_path.endswith(('.pt', '.pth')):
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        checkpoint = torch.load(model_path, map_location=device)
+class Predictor:
+    """
+    Class for gene expression prediction using trained model
+    Args:
+        model_path: Path to the trained model weights
+        features_file: Path to the features file
+        input_dim: Input feature dimension
+        output_dim: Output dimension (number of genes)
+    """
+    def __init__(self, model_path, features_file, input_dim=None, output_dim=None):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model_path = model_path
         
-        model = CustomPytorchRegressor(
-            input_size=checkpoint['config']['input_size'],
-            output_size=checkpoint['config']['output_size'],
-            hidden_layer_sizes=checkpoint['config']['hidden_layer_sizes'],
-        )
-        model.model.load_state_dict(checkpoint['state_dict'])
-        model.eval()
+        # Load features data
+        with open(features_file, 'rb') as f:
+            features_data = pickle.load(f)
         
-        if checkpoint['config']['output_size'] != expected_genes:
-            raise ValueError(f"模型输出维度({checkpoint['config']['output_size']})与基因数({expected_genes})不匹配")
+        self.features = features_data['features']['fused']  # Using fused features (global + local)
+        self.cell_ids = features_data['cell_ids']
         
-        return model, gene_names
-
-    with open(model_path, 'rb') as f:
-        model_data = pickle.load(f)
+        # Determine input and output dimensions if not provided
+        if input_dim is None:
+            input_dim = self.features.shape[1]
+        
+        if output_dim is None:
+            # Default output dimension if not provided
+            output_dim = 1000  # This will be updated after loading the normalization info
+        
+        # Initialize model
+        self.model = CustomPytorchRegressor(input_dim, output_dim)
+        self.model.load_model(model_path)
+        
+        # Initialize normalization info
+        self.normalization_info = None
+        self.scaler = None
+        
+    def load_normalization_info(self, normalization_info_path):
+        """
+        Load normalization information
+        Args:
+            normalization_info_path: Path to the normalization info file
+        """
+        with open(normalization_info_path, 'rb') as f:
+            self.normalization_info = pickle.load(f)
+        
+        # Initialize scaler with loaded parameters
+        self.scaler = StandardScaler()
+        self.scaler.mean_ = self.normalization_info['x_mean']
+        self.scaler.scale_ = self.normalization_info['x_std']
+        
+        # Update output dimension if needed
+        if hasattr(self.normalization_info, 'y_min') and len(self.normalization_info['y_min']) > 0:
+            if hasattr(self.model, 'model'):
+                output_layer = self.model.model.expression_branch
+                if output_layer.out_features != len(self.normalization_info['y_min']):
+                    print(f"Updating output dimension from {output_layer.out_features} to {len(self.normalization_info['y_min'])}")
+                    # Recreate output layers with correct dimensions
+                    self.model.model.expression_branch = torch.nn.Linear(
+                        output_layer.in_features,
+                        len(self.normalization_info['y_min'])
+                    ).to(self.device)
+                    self.model.model.binary_branch = torch.nn.Linear(
+                        output_layer.in_features,
+                        len(self.normalization_info['y_min'])
+                    ).to(self.device)
+                    # Reload model weights
+                    self.model.load_model(self.model_path)
     
-    if isinstance(model_data, dict):
-        if 'torch_model_path' in model_data:
-            config = model_data['model_config']
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            
-            model = CustomPytorchRegressor(
-                input_size=config['input_size'],
-                output_size=config['output_size'],
-                hidden_layer_sizes=config['hidden_layer_sizes'],
-                alpha=config['alpha'],
-                batch_size=config['batch_size'],
-                binary_weight=config['binary_weight'],
-                expression_weight=config['expression_weight'],
-                device=device
-            )
-            model.model = model._init_model()
-            torch_state = torch.load(model_data['torch_model_path'], map_location=device)
-            model.model.load_state_dict(torch_state['state_dict'])
-            model.model.eval()
-            
-            return model, gene_names
-
-        return model_data.get('model'), gene_names
-    
-    return model_data, gene_names
-
-def load_features(feature_file):
-
-    print(f"加载特征文件: {feature_file}")
-    with open(feature_file, 'rb') as f:
-        data = pickle.load(f)
-    
-    # 错误处理1: 检查必要字段
-    required_keys = ['cell_ids', 'features']
-    for key in required_keys:
-        if key not in data:
-            raise KeyError(f"特征文件缺少必要字段: {key}")
-    
-    # 错误处理2: 处理不同特征格式
-    features = data['features']
-    if isinstance(features, np.ndarray):
-        cls_features = features
-    elif isinstance(features, dict):
-        if 'cls' not in features:
-            raise KeyError("features字典中缺少'cls'键")
-        cls_features = features['cls']
-    else:
-        raise TypeError(f"不支持的features类型: {type(features)}")
-    
-    print(f"特征矩阵形状: {cls_features.shape}")
-    return cls_features, data['cell_ids']
-
-def load_train_data(h5ad_file, gene_list_file=None):
-
-    print(f"加载训练数据: {h5ad_file}")
-    adata = ad.read_h5ad(h5ad_file)
-    
-    if gene_list_file is not None:
-        if gene_list_file.endswith('.csv'):
-            gene_names = pd.read_csv(gene_list_file, header=None)[0].tolist()
+    def preprocess_features(self):
+        """
+        Preprocess features using the loaded scaler
+        Returns:
+            Preprocessed features
+        """
+        if self.scaler is not None:
+            return self.scaler.transform(self.features)
         else:
-            with open(gene_list_file, 'r') as f:
-                gene_names = [line.strip() for line in f]
-
-        gene_mask = adata.var_names.isin(gene_names)
-        adata = adata[:, gene_mask]
+            # If no scaler is available, use raw features
+            print("Warning: No normalization information loaded. Using raw features.")
+            return self.features
+    
+    def predict(self):
+        """
+        Generate predictions using the loaded model
+        Returns:
+            Predictions array
+        """
+        # Preprocess features
+        preprocessed_features = self.preprocess_features()
         
-
-    if hasattr(adata.X, "toarray"):
-        y_train = adata.X.toarray()
-    else:
-        y_train = adata.X
+        # Create a simple DataLoader for prediction
+        from torch.utils.data import TensorDataset, DataLoader
+        
+        # Create dataset and dataloader
+        dataset = TensorDataset(torch.tensor(preprocessed_features, dtype=torch.float32))
+        dataloader = DataLoader(dataset, batch_size=256, shuffle=False)
+        
+        # Generate predictions
+        self.model.model.eval()
+        all_predictions = []
+        
+        with torch.no_grad():
+            for batch in dataloader:
+                features = batch[0].to(self.device)
+                
+                # Forward pass
+                expression_pred, binary_pred = self.model.model(features)
+                
+                # Apply sigmoid to binary predictions and combine with expression predictions
+                sigmoid = torch.nn.Sigmoid()
+                binary_prob = sigmoid(binary_pred)
+                final_pred = binary_prob * expression_pred
+                
+                all_predictions.append(final_pred.cpu().numpy())
+        
+        # Concatenate all predictions
+        predictions = np.concatenate(all_predictions, axis=0)
+        
+        return predictions
     
-    print(f"训练数据矩阵形状: {y_train.shape}")
-    return y_train
-
-
-
-def predict_mlp(model, X, y_train):
-    print("使用MLP模型进行预测...")
-
-    if np.any(~np.isfinite(X)):
-        print("发现 NaN 或无穷值，替换为 0")
-        X = np.nan_to_num(X)
-
-    if hasattr(model, 'predict'):
-        y_pred_scaled = model.predict(X)
-    else:
-        raise RuntimeError("模型未实现 predict 接口")
+    def denormalize_predictions(self, predictions):
+        """
+        Denormalize predictions using the loaded normalization information
+        Args:
+            predictions: Normalized predictions
+        Returns:
+            Denormalized predictions
+        """
+        if self.normalization_info is None:
+            print("Warning: No normalization information loaded. Returning raw predictions.")
+            return predictions
+        
+        # Ensure predictions and normalization info have the same number of genes
+        if predictions.shape[1] != len(self.normalization_info['y_min']):
+            print(f"Warning: Mismatch between prediction dimensions ({predictions.shape[1]}) and normalization info dimensions ({len(self.normalization_info['y_min'])})")
+            return predictions
+        
+        # Denormalize each gene
+        denormalized = np.copy(predictions)
+        for i in range(predictions.shape[1]):
+            # Apply denormalization only to non-zero predictions
+            mask = denormalized[:, i] > 0
+            if mask.any():
+                denormalized[mask, i] = denormalized[mask, i] * self.normalization_info['y_range'][i] + self.normalization_info['y_min'][i]
+        
+        return denormalized
     
-    print(f"模型:{y_pred_scaled.shape}, 模型输出维度: {y_pred_scaled.shape[1]}, 训练数据基因数: {y_train.shape[1]}")
-
-    with open(r'train_256\embedd\normalization_info.pkl', 'rb') as f:
-        normalization_info = pickle.load(f)
-
-    y_min = normalization_info['y_min']
-    y_range = normalization_info['y_range']
-
-    # y_pred_normalized: 预测得到的归一化表达量，shape = [N, G]
-
-    y_pred = denormalize_expression(y_pred_scaled, y_min, y_range)   
-
-    y_pred[y_pred < 0.5] = 0.0
-    print(f"预测非零比例: {(y_pred > 0).sum() / y_pred.size * 100:.2f}%")
-    return y_pred
-    #return y_pred_scaled
-
-
-def save_predictions(y_pred, cell_ids, gene_names, output_file, format='h5ad'):
-    """保存预测结果到文件"""
-    print(f"保存预测结果到: {output_file}")
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    
-    print(f"非零值数量: {np.sum(y_pred > 0)}")
-    print(f"最小非零值: {np.min(y_pred[y_pred > 0])}")
-    print(f"最大值: {np.max(y_pred)}")
-
-    if not gene_names:
-        print("警告：基因名称列表为空或长度与预测结果列数不匹配，尝试生成默认基因名称。")
-        gene_names = [f"Gene_{i}" for i in range(y_pred.shape[1])]
-
-    if format == 'h5ad':
-        sparse_y = sp.csr_matrix(y_pred)
+    def save_predictions_to_h5ad(self, predictions, gene_names, output_file, reference_h5ad=None):
+        """
+        Save predictions to h5ad file format
+        Args:
+            predictions: Predicted gene expression values
+            gene_names: List of gene names
+            output_file: Path to output h5ad file
+            reference_h5ad: Optional reference h5ad file to copy metadata from
+        """
+        # Ensure the number of genes matches
+        if predictions.shape[1] != len(gene_names):
+            raise ValueError(f"Mismatch between prediction dimensions ({predictions.shape[1]}) and gene names ({len(gene_names)})")
+        
+        # Create AnnData object
         adata = ad.AnnData(
-            X=sparse_y, 
-            obs=pd.DataFrame(index=cell_ids), 
+            X=predictions,
+            obs=pd.DataFrame(index=self.cell_ids),
             var=pd.DataFrame(index=gene_names)
         )
-        adata.write(output_file)
-    else:
-        pd.DataFrame(y_pred, index=cell_ids, columns=gene_names).to_csv(output_file)
+        
+        # Add metadata from reference h5ad if provided
+        if reference_h5ad is not None:
+            ref_adata = ad.read_h5ad(reference_h5ad)
+            
+            # Copy cell metadata if available
+            for key in ref_adata.obs.columns:
+                if key in adata.obs.index:
+                    adata.obs[key] = ref_adata.obs.loc[adata.obs.index, key]
+            
+            # Copy gene metadata if available
+            for key in ref_adata.var.columns:
+                if key in adata.var.index:
+                    adata.var[key] = ref_adata.var.loc[adata.var.index, key]
+            
+            # Copy unstructured metadata
+            adata.uns = ref_adata.uns.copy()
+        
+        # Save to h5ad file
+        os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+        adata.write_h5ad(output_file)
+        print(f"Predictions saved to {output_file}")
 
 def parse_args():
-    """解析命令行参数"""
-    parser = argparse.ArgumentParser(description="预测细胞基因表达量")
-    parser.add_argument("--model", required=True, help="模型文件路径")
-    parser.add_argument("--feature_file", required=True, help="特征文件路径")
-    parser.add_argument("--train_data", required=True, help="训练数据文件路径") 
-    parser.add_argument("--gene_list", required=True) # 新增参数
-    parser.add_argument("--output_file", required=True, help="输出文件路径")
-    parser.add_argument("--output_format", choices=['h5ad', 'csv'], default='h5ad')
+    """
+    Parse command line arguments
+    """
+    parser = argparse.ArgumentParser(description='Predict gene expression using trained model')
+    parser.add_argument('--model_path', type=str, required=True, help='Path to trained model weights')
+    parser.add_argument('--features_file', type=str, required=True, help='Path to features file (.pkl)')
+    parser.add_argument('--normalization_info', type=str, default=None, help='Path to normalization info file (.pkl)')
+    parser.add_argument('--output_file', type=str, required=True, help='Path to output h5ad file')
+    parser.add_argument('--reference_h5ad', type=str, default=None, help='Optional reference h5ad file for metadata')
+    parser.add_argument('--gene_list_file', type=str, default=None, help='Path to gene list file (.txt)')
+    parser.add_argument('--input_dim', type=int, default=None, help='Input feature dimension (optional)')
+    parser.add_argument('--output_dim', type=int, default=None, help='Output dimension (number of genes, optional)')
     return parser.parse_args()
 
+def load_gene_names(gene_list_file=None, reference_h5ad=None):
+    """
+    Load gene names from file or reference h5ad
+    Args:
+        gene_list_file: Path to gene list file
+        reference_h5ad: Path to reference h5ad file
+    Returns:
+        List of gene names
+    """
+    if gene_list_file is not None:
+        with open(gene_list_file, 'r') as f:
+            gene_names = [line.strip() for line in f if line.strip()]
+        return gene_names
+    elif reference_h5ad is not None:
+        ref_adata = ad.read_h5ad(reference_h5ad)
+        return list(ref_adata.var.index)
+    else:
+        # Default gene names if neither file is provided
+        print("Warning: No gene list or reference h5ad provided. Using generic gene names.")
+        return [f"gene_{i}" for i in range(1000)]  # Default to 1000 genes
+
 def main():
+    """
+    Main function for gene expression prediction
+    """
     args = parse_args()
-
-    y_train = load_train_data(
-        h5ad_file=args.train_data, 
-        gene_list_file=args.gene_list  
-    )
-    n_genes = y_train.shape[1]
-    model, gene_names = load_model(args.model, expected_genes=n_genes, gene_list_file=args.gene_list)
-
-    X, cell_ids = load_features(args.feature_file)
-    y_pred = predict_mlp(model, X, y_train)
     
-    if y_pred is not None:
-        save_predictions(y_pred, cell_ids, gene_names, args.output_file, args.output_format)
+    # Load gene names
+    gene_names = load_gene_names(args.gene_list_file, args.reference_h5ad)
+    
+    # Initialize predictor
+    print(f"Initializing predictor with model: {args.model_path}")
+    predictor = Predictor(
+        model_path=args.model_path,
+        features_file=args.features_file,
+        input_dim=args.input_dim,
+        output_dim=args.output_dim or len(gene_names)
+    )
+    
+    # Load normalization information if provided
+    if args.normalization_info is not None:
+        print(f"Loading normalization information from: {args.normalization_info}")
+        predictor.load_normalization_info(args.normalization_info)
+    
+    # Generate predictions
+    print("Generating predictions...")
+    start_time = time.time()
+    
+    predictions = predictor.predict()
+    
+    # Denormalize predictions if normalization info is available
+    if predictor.normalization_info is not None:
+        predictions = predictor.denormalize_predictions(predictions)
+    
+    elapsed_time = time.time() - start_time
+    print(f"Prediction completed in {elapsed_time:.2f} seconds")
+    print(f"Prediction shape: {predictions.shape} - (number of cells, number of genes)")
+    
+    # Save predictions to h5ad file
+    predictor.save_predictions_to_h5ad(
+        predictions=predictions,
+        gene_names=gene_names,
+        output_file=args.output_file,
+        reference_h5ad=args.reference_h5ad
+    )
 
 if __name__ == '__main__':
     main()

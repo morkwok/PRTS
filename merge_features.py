@@ -12,14 +12,14 @@ def load_batch_file(file_path):
 
 def merge_cls_features(prefix):
 
-    cls_folder = os.path.join(prefix, 'embedd', 'fused')
+    cls_folder = os.path.join(prefix, 'embedd', 'cls')
     if not os.path.exists(cls_folder):
         print(f"错误: 目录 {cls_folder} 不存在")
         return
 
-    batch_files = sorted(glob.glob(os.path.join(cls_folder, "*_fused.pickle")))
+    batch_files = sorted(glob.glob(os.path.join(cls_folder, "*_cls.pickle")))
     if not batch_files:
-        print(f"未找到任何融合特征批次文件: {cls_folder}/*_fused.pickle")
+        print(f"未找到任何融合特征批次文件: {cls_folder}/*_cls.pickle")
         return
 
     print(f"找到 {len(batch_files)} 个融合特征批次文件")
@@ -44,7 +44,7 @@ def merge_cls_features(prefix):
     merged_data['features'] = np.concatenate(merged_data['features'], axis=0)
     print(f"融合特征形状: {merged_data['features'].shape}")
 
-    output_file = os.path.join(prefix, 'embedd', 'merged_fused_features.pickle')
+    output_file = os.path.join(prefix, 'embedd', 'merged_cls_features.pickle')
     with open(output_file, 'wb') as f:
         pickle.dump(merged_data, f)
 

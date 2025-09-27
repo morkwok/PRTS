@@ -1,41 +1,40 @@
-# PRTS细胞基因表达预测
+# Cell-level Gene Expression Prediction
 
-本方法用于从细胞图像预测基因表达量。基于ViT模型，从细胞图像中提取特征，然后使用这些特征来预测细胞的基因表达谱。
+This method is used to predict gene expression from histological cell images. It is based on Vision Transformer (ViT) models to extract features from cell images and then uses these features to predict the gene expression profiles of cells.
 
-## 目录结构
+## Directory Structure
 
-├── main\    // 主程序文件夹  
-│   ├── preprocess_image.py    // 用于预处理图像的Python脚本  
-│   ├── rescale.py    // 用于图像缩放的Python脚本  
-│   ├── extract_features.py    // 用于从细胞图像中提取特征的Python脚本  
-│   ├── merge_features.py    // 用于合并特征的Python脚本  
-│   ├── train_model.py    // 用于训练模型的Python脚本  
-│   ├── predict_expression.py    // 用于预测基因表达量的Python脚本  
-│   ├── model_utils.py    // 与HIPT模型相关的工具函数脚本  
-│   ├── utils.py    // 通用工具函数脚本  
-│   ├── vision_transformer.py    // 视觉Transformer相关的脚本  
-│   ├── README.md    // 说明文档  
-│   ├── requirements.txt    // 项目依赖文件  
-│   └── work\    // 各种分析和可视化脚本  
-│       ├── Before train\    // 训练前相关脚本   
-│       │   ├── Before train.py    // 训练前的分析脚本  
-│       │   ├── Before train2.py    // 训练前的分析脚本2  
-│       │   ├── Before train3.py    // 训练前的分析脚本3  
-│       │   ├── Before train4.py    // 训练前的分析脚本4  
-│       │   ├── Validation dataset.py    // 验证数据集分析脚本  
-│       │   └── Validation dataset 2.py    // 验证数据集分析脚本2  
-│       ├── IHC\  
-│       │   ├── IHC-A-cell segmentation.py    // IHC-A 区域细胞分割脚本  
-│       │   ├── IHC-A-expression.py    // IHC-A 区域基因表达脚本  
-│       │   ├── IHC-B-cell segmentation.py    // IHC-B 区域细胞分割脚本  
-│       │   └── IHC-B-expression.py    // IHC-B 区域基因表达脚本  
-│       └── ...  
+├── main\    // Main program folder
+│   ├── preprocess_image.py    // Python script for image preprocessing
+│   ├── rescale.py    // Python script for image rescaling
+│   ├── extract_features.py    // Python script for extracting features from cell images
+│   ├── merge_features.py    // Python script for merging features
+│   ├── train_model.py    // Python script for training the prediction model
+│   ├── predict_expression.py    // Python script for predicting gene expression
+│   ├── model_utils.py    // Utility functions related to HIPT model
+│   ├── utils.py    // General utility functions
+│   ├── vision_transformer.py    // Vision Transformer implementation
+│   ├── README.md    // Documentation
+│   ├── requirements.txt    // Project dependencies
+│   └── work\    // Various analysis and visualization scripts
+│       ├── Before train\    // Scripts before training
+│       │   ├── Before train.py    // Analysis script before training
+│       │   ├── Before train2.py    // Analysis script before training 2
+│       │   ├── Before train3.py    // Analysis script before training 3
+│       │   ├── Before train4.py    // Analysis script before training 4
+│       │   ├── Validation dataset.py    // Validation dataset analysis script
+│       │   └── Validation dataset 2.py    // Validation dataset analysis script 2
+│       ├── IHC\
+│       │   ├── IHC-A-cell segmentation.py    // IHC-A region cell segmentation script
+│       │   ├── IHC-A-expression.py    // IHC-A region gene expression script
+│       │   ├── IHC-B-cell segmentation.py    // IHC-B region cell segmentation script
+│       │   └── IHC-B-expression.py    // IHC-B region gene expression script
+│       └── ...
 
-## 使用方法
+## Usage Instructions
 
-### 1. 预处理和缩放图像
+### 1. Preprocess and Rescale Images
 ```bash
-
 python preprocess_image.py \
     --valid_path /path/to/images/ \
     --train_path /path/to/images/ \
@@ -43,46 +42,45 @@ python preprocess_image.py \
 ```
 
 ```bash
-
 python rescale.py \
     --prefix /path/to/images/
 ```
 
-### 2. 特征提取
-
-
+### 2. Extract Features
 ```bash
 python extract_features.py \
     --prefix /path/to/images/ \
-    --h5ad-file /path/to/cells.h5ad \
-    --device cuda \
-    --batch-size 100
+    --output_file features.pkl
 ```
 
-```bash
-python merge_features.py \
-    --input-dir /path/to/embedd \
-    --output-file /path/to/cell_features.pkl
-```
-
-### 3. 模型训练
-
+### 3. Train Model
 ```bash
 python train_model.py \
-    --feature_file /path/to/cell_features.pkl \
-    --h5ad_file /path/to/gene_expression.h5ad \
-    --gene_list /path/to/gene_list.txt \
-    --output_model /path/to/mlp_model.pkl \
-    --model_type mlp \
-    --hidden_layers "512,512,1024,1024" \
-    --alpha 0.01
+    --feature_file features.pkl \
+    --h5ad_file expression_data.h5ad \
+    --output_dir ./output/
 ```
 
-### 4. 基因表达预测
-
+### 4. Predict Gene Expression
 ```bash
 python predict_expression.py \
-    --model /path/to/mlp_model.pkl \
-    --feature_file /path/to/new_cell_features.pkl \
-    --output_file /path/to/predictions.h5ad \
+    --feature_file features.pkl \
+    --model_file ./output/model.pkl \
+    --output_file prediction.h5ad
 ```
+
+## Methodology
+
+### Image Processing
+To facilitate the processing of histological images with different resolutions, each image is first rescaled so that the size of each pixel is 0.5 × 0.5 μm². This ensures a 16 × 16-pixel tile corresponds to an area of 8 × 8 μm², which is about the size of a single cell.
+
+### Feature Extraction
+For each cell, a 256 × 256-pixel image tile centered on its spatial location is extracted and used as input to a pre-trained Vision Transformer (ViT) model. This model, specifically a ViT-256/16 pre-trained with the self-supervised DINO framework, processes the image by dividing it into a sequence of 16 × 16 patches (tokens).
+
+The final hidden state of the dedicated [CLS] token serves as a holistic representation of the entire image tile, which is used as the global feature vector. To represent fine-grained cellular morphology, the local feature is derived from the patch tokens whose corresponding 16 × 16 regions overlap with the cell nucleus. These feature vectors are aggregated by average pooling to form a unified vector. The local and global features are then concatenated to form a comprehensive histology feature vector.
+
+### Prediction Model
+A dual-output neural network model is designed to simultaneously determine whether a gene is expressed and predict its expression level. Given the class imbalance problem in transcriptomics datasets, class weights are introduced into the loss function to enhance the model's capacity. The network architecture consists of 4 hidden layers with 512, 512, 1024, 1024 nodes, using leaky ReLU activation functions, Batch Normalization, and Dropout (rate=0.1).
+
+### Evaluation Metrics
+Prediction accuracy is assessed using the Root Mean Square Error (RMSE) and the Pearson Correlation Coefficient (PCC) between predicted and ground truth gene expression values.
