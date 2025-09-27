@@ -4,31 +4,31 @@ This method is used to predict gene expression from histological cell images. It
 
 ## Directory Structure
 
-├── main\    // Main program folder
-│   ├── preprocess_image.py    // Python script for image preprocessing
-│   ├── rescale.py    // Python script for image rescaling
-│   ├── extract_features.py    // Python script for extracting features from cell images
-│   ├── merge_features.py    // Python script for merging features
-│   ├── train_model.py    // Python script for training the prediction model
-│   ├── predict_expression.py    // Python script for predicting gene expression
-│   ├── model_utils.py    // Utility functions related to HIPT model
-│   ├── utils.py    // General utility functions
-│   ├── vision_transformer.py    // Vision Transformer implementation
-│   ├── README.md    // Documentation
-│   ├── requirements.txt    // Project dependencies
-│   └── work\    // Various analysis and visualization scripts
-│       ├── Before train\    // Scripts before training
-│       │   ├── Before train.py    // Analysis script before training
-│       │   ├── Before train2.py    // Analysis script before training 2
-│       │   ├── Before train3.py    // Analysis script before training 3
-│       │   ├── Before train4.py    // Analysis script before training 4
-│       │   ├── Validation dataset.py    // Validation dataset analysis script
-│       │   └── Validation dataset 2.py    // Validation dataset analysis script 2
-│       ├── IHC\
-│       │   ├── IHC-A-cell segmentation.py    // IHC-A region cell segmentation script
-│       │   ├── IHC-A-expression.py    // IHC-A region gene expression script
-│       │   ├── IHC-B-cell segmentation.py    // IHC-B region cell segmentation script
-│       │   └── IHC-B-expression.py    // IHC-B region gene expression script
+├── main    // Main program folder \
+│   ├── preprocess_image.py    // Python script for image preprocessing \
+│   ├── rescale.py    // Python script for image rescaling \
+│   ├── extract_features.py    // Python script for extracting features from cell images \
+│   ├── merge_features.py    // Python script for merging features \
+│   ├── train_model.py    // Python script for training the prediction model \
+│   ├── predict_expression.py    // Python script for predicting gene expression \
+│   ├── model_utils.py    // Utility functions related to HIPT model \
+│   ├── utils.py    // General utility functions \
+│   ├── vision_transformer.py    // Vision Transformer implementation \
+│   ├── README.md    // Documentation \
+│   ├── requirements.txt    // Project dependencies \
+│   └── work    // Various analysis and visualization scripts \
+│       ├── Before train    // Scripts before training \
+│       │   ├── Before train.py    // Analysis script before training \
+│       │   ├── Before train2.py    // Analysis script before training 2 \
+│       │   ├── Before train3.py    // Analysis script before training 3 \
+│       │   ├── Before train4.py    // Analysis script before training 4 \
+│       │   ├── Validation dataset.py    // Validation dataset analysis script \
+│       │   └── Validation dataset 2.py    // Validation dataset analysis script 2 \
+│       ├── IHC \
+│       │   ├── IHC-A-cell segmentation.py    // IHC-A region cell segmentation script \
+│       │   ├── IHC-A-expression.py    // IHC-A region gene expression script \
+│       │   ├── IHC-B-cell segmentation.py    // IHC-B region cell segmentation script \
+│       │   └── IHC-B-expression.py    // IHC-B region gene expression script \
 │       └── ...
 
 ## Usage Instructions
